@@ -5,8 +5,8 @@ import com.intellij.openapi.project.Project
 import com.intellij.openapi.project.guessModuleDir
 import com.intellij.openapi.project.guessProjectDir
 import com.intellij.openapi.roots.ProjectFileIndex
-import com.intellij.openapi.vcs.changes.ignore.cache.PatternCache
-import com.intellij.openapi.vcs.changes.ignore.lang.Syntax
+import java.nio.file.FileSystems
+import java.nio.file.PathMatcher
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.search.GlobalSearchScope
 import ski.chrzanow.foldableprojectview.settings.FoldableProjectSettings
@@ -21,7 +21,11 @@ class FoldableProjectSearchScope(project: Project, val settings: FoldableProject
         false -> this.lowercase()
     }
 
-    private val pattern = PatternCache.getInstance(project).createPattern(rule.caseSensitive(), Syntax.GLOB)
+    private val pattern = try {
+        FileSystems.getDefault().getPathMatcher("glob:${rule.caseSensitive()}")
+    } catch (e: Exception) {
+        null
+    }
 
     override fun contains(file: VirtualFile): Boolean {
         if (pattern == null) {
@@ -31,9 +35,18 @@ class FoldableProjectSearchScope(project: Project, val settings: FoldableProject
         val moduleDir = fileIndex.getModuleForFile(file)?.guessModuleDir() ?: project?.guessProjectDir() ?: return false
         val base = moduleDir.toNioPath()
         val relativePath = file.toNioPath().relativeToOrNull(base) ?: return false
-        val path = relativePath.pathString.caseSensitive()
+        
+        // Convert to string with case sensitivity applied
+        val pathString = relativePath.pathString.caseSensitive()
+        
+        // Create a path from the string for matching
+        val pathToMatch = try {
+            java.nio.file.Paths.get(pathString)
+        } catch (e: Exception) {
+            return false
+        }
 
-        return pattern.matcher(path).matches()
+        return pattern.matches(pathToMatch)
     }
 
     override fun isSearchInModuleContent(aModule: Module) = true

@@ -18,8 +18,8 @@ import com.intellij.openapi.roots.ProjectFileIndex
 import com.intellij.openapi.vcs.FileStatus
 import com.intellij.openapi.vcs.FileStatusListener
 import com.intellij.openapi.vcs.FileStatusManager
-import com.intellij.openapi.vcs.changes.ignore.cache.PatternCache
-import com.intellij.openapi.vcs.changes.ignore.lang.Syntax
+import java.nio.file.FileSystems
+import java.nio.file.PathMatcher
 import ski.chrzanow.foldableprojectview.or
 import ski.chrzanow.foldableprojectview.settings.FoldableProjectSettings
 import ski.chrzanow.foldableprojectview.settings.FoldableProjectSettingsListener
@@ -27,7 +27,6 @@ import ski.chrzanow.foldableprojectview.settings.FoldableProjectSettingsListener
 class FoldableTreeStructureProvider(private val project: Project) : TreeStructureProvider {
 
     private val settings by lazy { project.service<FoldableProjectSettings>() }
-    private val patternCache = PatternCache.getInstance(project)
     private var previewProjectViewPane: ProjectViewPane? = null
     private var previewGraphProperty: ObservableMutableProperty<FoldableProjectSettings>? = null
     private val state get() = previewGraphProperty?.get() ?: settings
@@ -78,9 +77,15 @@ class FoldableTreeStructureProvider(private val project: Project) : TreeStructur
             parent.parent is ProjectViewProjectNode -> {
                 val matched = mutableSetOf<AbstractTreeNode<*>>()
 
-                // TODO: allow for duplicates? – checkbox in settings; otherwise the first rule will take the precedence
-                val groups = state.rules.map {
-                    FoldableProjectViewNode(project, viewSettings, state, it, parent)
+                // 为每个规则创建折叠组
+                val groups = state.rules.mapNotNull { rule ->
+                    val matchedFiles = children.match(rule.pattern)
+                    
+                    if (matchedFiles.isNotEmpty() && 
+                        !(state.hideAllGroups || (state.hideEmptyGroups && matchedFiles.isEmpty()))) {
+                        matched.addAll(matchedFiles)
+                        FoldableProjectViewNode(project, viewSettings, state, rule, parent)
+                    } else null
                 }
 
                 children - matched + groups
@@ -167,11 +172,13 @@ class FoldableTreeStructureProvider(private val project: Project) : TreeStructur
                 patterns
                     .split(' ')
                     .any { pattern ->
-                        patternCache
-                            .createPattern(pattern, Syntax.GLOB)
-                            ?.matcher(name)
-                            ?.matches()
-                            ?: false
+                        try {
+                            val pathMatcher = FileSystems.getDefault().getPathMatcher("glob:$pattern")
+                            val pathToMatch = java.nio.file.Paths.get(name)
+                            pathMatcher.matches(pathToMatch.fileName ?: pathToMatch)
+                        } catch (e: Exception) {
+                            false
+                        }
                     }
             }.or(state.foldIgnoredFiles and (it.fileStatus.equals(FileStatus.IGNORED)))
         }
