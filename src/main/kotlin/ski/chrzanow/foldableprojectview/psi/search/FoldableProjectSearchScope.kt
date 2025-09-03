@@ -9,6 +9,7 @@ import java.nio.file.FileSystems
 import java.nio.file.PathMatcher
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.search.GlobalSearchScope
+import ski.chrzanow.foldableprojectview.go.GoWorkService
 import ski.chrzanow.foldableprojectview.settings.FoldableProjectSettings
 import kotlin.io.path.pathString
 import kotlin.io.path.relativeToOrNull
@@ -21,32 +22,43 @@ class FoldableProjectSearchScope(project: Project, val settings: FoldableProject
         false -> this.lowercase()
     }
 
-    private val pattern = try {
-        FileSystems.getDefault().getPathMatcher("glob:${rule.caseSensitive()}")
-    } catch (e: Exception) {
-        null
-    }
+    private val patterns: List<PathMatcher> =
+        rule
+            .split(' ')
+            .mapNotNull { raw ->
+                val p = raw.trim().takeIf { it.isNotEmpty() } ?: return@mapNotNull null
+                try {
+                    FileSystems.getDefault().getPathMatcher("glob:${p.caseSensitive()}")
+                } catch (_: Exception) {
+                    null
+                }
+            }
 
     override fun contains(file: VirtualFile): Boolean {
-        if (pattern == null) {
+        if (patterns.isEmpty()) {
             return false
         }
+        // Keep base detection for future relative logic (currently we match by name only)
+        val goWorkService = project?.getService(GoWorkService::class.java)
+        val workspaceRoot = goWorkService?.findWorkspaceRootFor(file)
+        val moduleDir = workspaceRoot ?: fileIndex.getModuleForFile(file)?.guessModuleDir() ?: project?.guessProjectDir() ?: return false
+        moduleDir.toNioPath()
 
-        val moduleDir = fileIndex.getModuleForFile(file)?.guessModuleDir() ?: project?.guessProjectDir() ?: return false
-        val base = moduleDir.toNioPath()
-        val relativePath = file.toNioPath().relativeToOrNull(base) ?: return false
-        
-        // Convert to string with case sensitivity applied
-        val pathString = relativePath.pathString.caseSensitive()
-        
-        // Create a path from the string for matching
+        // Match by file/directory name only (consistent with UI/Tree filtering)
+        val name = file.name.caseSensitive()
         val pathToMatch = try {
-            java.nio.file.Paths.get(pathString)
-        } catch (e: Exception) {
+            java.nio.file.Paths.get(name)
+        } catch (_: Exception) {
             return false
         }
 
-        return pattern.matches(pathToMatch)
+        return patterns.any { m ->
+            try {
+                m.matches(pathToMatch.fileName ?: pathToMatch)
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 
     override fun isSearchInModuleContent(aModule: Module) = true

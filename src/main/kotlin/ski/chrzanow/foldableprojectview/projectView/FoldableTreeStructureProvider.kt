@@ -21,6 +21,7 @@ import com.intellij.openapi.vcs.FileStatusManager
 import java.nio.file.FileSystems
 import java.nio.file.PathMatcher
 import ski.chrzanow.foldableprojectview.or
+import ski.chrzanow.foldableprojectview.go.GoWorkService
 import ski.chrzanow.foldableprojectview.settings.FoldableProjectSettings
 import ski.chrzanow.foldableprojectview.settings.FoldableProjectSettingsListener
 
@@ -74,7 +75,20 @@ class FoldableTreeStructureProvider(private val project: Project) : TreeStructur
             // Parent is a directory node, not a module, and matching nested is disabled
 //            !isModule(parent, project) -> children
 
-            parent.parent is ProjectViewProjectNode -> {
+            // Apply folding under project root directories OR under go.work module roots when enabled
+            (run {
+                val isTopLevel = parent.parent is ProjectViewProjectNode
+                val limitToGoWork = state.limitToGoWorkModules
+                if (!limitToGoWork) {
+                    isTopLevel
+                } else {
+                    val svc = project.service<GoWorkService>()
+                    val hasWorkspace = svc.isWorkspaceEnabled()
+                    val isWorkspaceRoot = svc.isWorkspaceModuleDir(parent.virtualFile)
+                    // If go.work exists, apply only for its module roots; otherwise fallback to original behavior
+                    if (hasWorkspace) isWorkspaceRoot else isTopLevel
+                }
+            }) -> {
                 val matched = mutableSetOf<AbstractTreeNode<*>>()
 
                 // 为每个规则创建折叠组
