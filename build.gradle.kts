@@ -1,3 +1,4 @@
+import org.gradle.api.JavaVersion
 import org.jetbrains.changelog.Changelog
 import org.jetbrains.changelog.markdownToHTML
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
@@ -15,7 +16,13 @@ version = providers.gradleProperty("pluginVersion").get()
 
 // Set the JVM language level used to build the project.
 kotlin {
-    jvmToolchain(17)
+    jvmToolchain(21)
+}
+
+java {
+    // IntelliJ Platform 2025.3 requires Java 21
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 // Configure project's dependencies
